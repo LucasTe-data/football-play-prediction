@@ -9,6 +9,7 @@ Created on Thu May 11 19:11:22 2023
 #%% Imports
 
 import pandas as pd
+import numpy as np
 
 import matplotlib.pyplot as plt
 plt.rcParams['figure.dpi'] = 200
@@ -16,9 +17,11 @@ import seaborn as sns
 
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report
 #from sklearn.metrics import roc_curve, auc
 
 import torch
@@ -50,7 +53,8 @@ class SimpleLSTM(nn.Module):
     def __init__(self, in_features, out_features = 2):
         super().__init__()
         
-        self.lstm = nn.LSTM(input_size = in_features, hidden_size = 248, batch_first = True)
+        self.lstm = nn.LSTM(input_size = in_features, hidden_size = 248, 
+                            num_layers = 2, batch_first = True)
         self.lin0 = nn.Linear(248, out_features)
     
     def forward(self, x):
@@ -98,6 +102,8 @@ pbp_df['DriveId'] = pbp_df.groupby('GameId')['DriveId'].transform(lambda x: pd.f
 sorted_drive_counts = pbp_df.groupby(['GameId', 'DriveId']).size().value_counts().sort_index()
 
 plt.bar(sorted_drive_counts.index, sorted_drive_counts)
+plt.xlabel('Length of Drive')
+plt.ylabel('Count')
 plt.show()
 
 
@@ -205,8 +211,43 @@ for name, group in pbp_df_time.groupby(['GameId', 'DriveId']):
     X_stack.append(group[variables].head(3).to_numpy())
     y_stack.append(group['PlayType'].tail(1).values[0])
 
+#%% Check Distribution of Run/Pass in Training Data
+print(F'{playtype_encoder.inverse_transform([[0]])[0][0]} : {y_stack.count(0)}')
+print(F'{playtype_encoder.inverse_transform([[1]])[0][0]} : {y_stack.count(1)}')
+
+#%%
+
+# Convert lists to numpy arrays
+X_stack = np.array(X_stack)
+y_stack = np.array(y_stack)
+
+# Separate the two groups based on labels
+group_0_data = X_stack[y_stack == 0]
+group_1_data = X_stack[y_stack == 1]
+
+# Determine the smaller group size
+# min_group_size = min(len(group_0_data), len(group_1_data))
+# max_group_size = max(len(group_0_data), len(group_1_data))
+
+group_size = int(sum([len(group_0_data), len(group_1_data)])/2)
+
+# Resample the larger group to match the smaller group size
+# resampled_group_0_data = resample(group_0_data, n_samples=min_group_size, replace=True, random_state=42)
+# resampled_group_1_data = resample(group_1_data, n_samples=min_group_size, replace=True, random_state=42)
+
+# Resample the smaller group to match the smaller group size
+resampled_group_0_data = resample(group_0_data, n_samples= group_size, replace=True, random_state=42)
+resampled_group_1_data = resample(group_1_data, n_samples= group_size, replace=True, random_state=42)
+
+
+# Combine the resampled data and labels
+X_resampled = np.concatenate((resampled_group_0_data, resampled_group_1_data), axis=0)
+# y_resampled = np.concatenate((np.zeros(min_group_size), np.ones(min_group_size)), axis=0)
+y_resampled = np.concatenate((np.zeros(group_size), np.ones(group_size)), axis=0)
+
+
 #%% Train-Test-Split for LSTM Dataset
-X_train, X_test, y_train, y_test = train_test_split(X_stack,y_stack)
+X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled)
 
 dataset_train = TensorDataset(torch.Tensor(X_train), torch.Tensor(y_train))
 
@@ -219,11 +260,11 @@ optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
 criterion = nn.CrossEntropyLoss()
 
 #%% Training Loop for LSTM
-epochs = 500
+epochs = 100
 losses = []
 
 start_time = time.time()
-for i in range(epochs):
+for i in range(1, epochs + 1):
     
     for batch in trainloader:
         X = batch[0]
@@ -241,7 +282,8 @@ for i in range(epochs):
     losses.append(loss)
 
     runtime = time.time() - start_time
-    print(F'{i}/{epochs} - Loss : {loss} - Runtime : {round(runtime/60, 2)}min')
+    mean_rt = runtime/i
+    print(F'{i}/{epochs} - Loss : {loss} - Runtime : {round(runtime/60, 2)}min / {round(mean_rt*epochs, 2)}min')
 
 #%% Plot Losses
 plt.plot(range(len(losses)), losses)
@@ -274,3 +316,31 @@ disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
 disp.plot()
 plt.title('Confusion Matrix')
 plt.show()
+
+
+#%% Model Evaluation - Complete Data
+with torch.no_grad():
+    y_pred = model.forward(torch.Tensor(X_stack)).argmax(dim = 1).numpy()
+
+
+accuracy = accuracy_score(y_stack,y_pred)
+precision = precision_score(y_stack,y_pred)
+
+recall = recall_score(y_stack,y_pred)
+f1 = f1_score(y_stack,y_pred)
+
+print(F'''Accuracy: {100*accuracy.round(4)}%
+Precision: {100*precision.round(4)}%
+Recall: {100*recall.round(4)}%
+F1-Score: {f1.round(4)}''')
+
+cf_matrix = confusion_matrix(y_stack ,y_pred, normalize = 'all')
+
+disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
+                              display_labels = playtype_encoder.categories_[0])
+
+disp.plot()
+plt.title('Confusion Matrix')
+plt.show()
+
+print(classification_report(y_stack, y_pred))
