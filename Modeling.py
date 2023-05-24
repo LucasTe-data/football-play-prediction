@@ -12,12 +12,14 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 plt.rcParams['figure.dpi'] = 200
+import seaborn as sns
 
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 
-from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
-from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+#from sklearn.metrics import roc_curve, auc
 
 import torch
 import torch.nn as nn
@@ -66,14 +68,15 @@ pbp_df['PlayType'] = playtype_encoder.fit_transform(pbp_df[['PlayType']]).astype
 
 #%% Add Drive Number feature
 
-pbp_df['TEST'] = pbp_df['OffenseTeam'] == pbp_df['OffenseTeam'].shift(1)
-pbp_df['TEST'] = ~ pbp_df['TEST']
+pbp_df['DriveId'] = ~ (pbp_df['OffenseTeam'] == pbp_df['OffenseTeam'].shift(1))
+pbp_df['DriveId'] = pbp_df['DriveId'].cumsum()
 
-print(pbp_df['TEST'].head().cumsum())
+pbp_df['DriveId'] = pbp_df.groupby('GameId')['DriveId'].transform(lambda x: pd.factorize(x)[0])
+
 
 #%% Train-Test Split
-variables = ['Down', 'ToGo', 'YardLine', 'GameTime', 'PreviousPlay', 
-             'NO HUDDLE', 'NO HUDDLE SHOTGUN', 'SHOTGUN', 'UNDER CENTER']
+variables = ['Down', 'ToGo', 'YardLine', 'GameTime', 'DriveId', 'NO HUDDLE', 
+             'NO HUDDLE SHOTGUN', 'SHOTGUN', 'UNDER CENTER', 'PreviousPlay']
 
 for i in range(1, n_previous):
     variables.append('PreviousPlay' + str(i + 1))
@@ -130,29 +133,27 @@ plt.show()
 
 #%% Model Evaluation - Predictions
 with torch.no_grad():
-    y_pred = model.forward(torch.Tensor(X_test)).argmax(dim = 1)
+    y_pred = model.forward(torch.Tensor(X_test)).argmax(dim = 1).numpy()
 
-y_test = playtype_encoder.inverse_transform(y_test.reshape(-1,1))
-y_pred = playtype_encoder.inverse_transform(y_pred.numpy().reshape(-1,1))
+#y_test = playtype_encoder.inverse_transform(y_test.reshape(-1,1))
+#y_pred = playtype_encoder.inverse_transform(y_pred.numpy().reshape(-1,1))
 #%% Model Evaluation - Scoring
 
 accuracy = accuracy_score(y_test,y_pred)
 precision = precision_score(y_test,y_pred)
 
-# recall = recall_score(y_test,y_pred)
-# f1 = f1_score(y_test,y_pred)
+recall = recall_score(y_test,y_pred)
+f1 = f1_score(y_test,y_pred)
 
-# print(F'''Accuracy: {100*accuracy.round(4)}%
-# Precision: {100*precision.round(4)}%
-# Recall: {100*recall.round(4)}%
-# F1-Score: {f1.round(4)}''')
+print(F'''Accuracy: {100*accuracy.round(4)}%
+Precision: {100*precision.round(4)}%
+Recall: {100*recall.round(4)}%
+F1-Score: {f1.round(4)}''')
 
-cf_matrix = confusion_matrix(y_test, y_pred,
-                              labels = encoder.categories_[0],
-                              normalize = 'all')
+cf_matrix = confusion_matrix(y_test, y_pred, normalize = 'all')
 
 disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
-                              display_labels = encoder.categories_[0])
+                              display_labels = playtype_encoder.categories_[0])
 
 disp.plot()
 plt.title('Confusion Matrix')
