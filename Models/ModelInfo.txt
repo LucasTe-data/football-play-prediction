@@ -1,0 +1,3 @@
+LSTM_v1 - in_features = 12, out_features = 2, hidden_size = 124, num_layers = 2
+LSTM_v2 - in_featrues = 12, out_features = 2, hidden_size = 124, num_layers = 3
+LSTM_v3 - in_featrues = 12, out_features = 2, hidden_size = 124, num_layers = 2
