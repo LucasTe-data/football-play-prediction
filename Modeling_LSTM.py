@@ -25,9 +25,10 @@ plt.rcParams['figure.dpi'] = 200
 
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.utils import resample, class_weight
+from sklearn.utils import resample
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import  matthews_corrcoef
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 #from sklearn.metrics import roc_curve, auc
 
@@ -36,10 +37,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 import time
+from tqdm import tqdm
 
-import shap
+from sklearn.tree import DecisionTreeClassifier # for surogate
 
-
+# TODO : Add meaningful comments
 
 #%% Define Model Classes
 class SimpleLSTM(nn.Module):
@@ -50,9 +52,13 @@ class SimpleLSTM(nn.Module):
         self.lstm = nn.LSTM(input_size = in_features, hidden_size = hidden_size, 
                             num_layers = num_layers, batch_first = True)
         
-        self.lin0 = nn.Linear(hidden_size, out_features)
-        
         self.dropout = nn.Dropout(p = 0.5)
+        
+        self.lin = nn.Linear(hidden_size, out_features)
+        
+        self.softmax = nn.Softmax()
+        
+        
     
     def forward(self, x):
         output, _ = self.lstm(x)
@@ -60,8 +66,44 @@ class SimpleLSTM(nn.Module):
         
         output = self.dropout(output)
         
-        output = self.lin0(output)
+        output = self.lin(output)
+        
+        output = self.softmax(output)
         return output
+    
+
+#%% Define Functions
+
+def model_evaluation(model, encoder, X, y, label = None):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model.forward(torch.Tensor(X)).argmax(dim = 1).numpy()
+        
+
+    accuracy = accuracy_score(y,y_pred)
+    precision = precision_score(y,y_pred)
+    recall = recall_score(y,y_pred)
+    f1 = f1_score(y,y_pred)
+    
+    mcc = matthews_corrcoef(y, y_pred)
+
+    print(F'''--- Metrics - {label} ---
+    Accuracy: \t {100*accuracy.round(4)}%
+    Precision: \t {100*precision.round(4)}%
+    Recall: \t {100*recall.round(4)}%
+    F1-Score: \t {100*f1.round(4)}%
+    MCC: \t \t {mcc.round(2)}
+    ''')
+
+    cf_matrix = confusion_matrix(y,y_pred, normalize = 'all')
+
+    disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
+                                  display_labels = encoder.categories_[0])
+
+    disp.plot()
+    plt.title('Confusion Matrix - {label}')
+    plt.show()
+    
         
 
 #%% Load Data
@@ -70,75 +112,47 @@ PATH = './Data/Processed/pbp-processed.csv'
 pbp_df = pd.read_csv(PATH)
 
 #%% Prepare Data for Modeling
-to_scale = ['Down', 'ToGo', 'YardLine', 'GameTime']
+to_scale = ['Down', 'ToGo', 'YardLine', 'GameTime', 'PointDifference']
 std_scaler = StandardScaler()
 pbp_df[to_scale] = std_scaler.fit_transform(pbp_df[to_scale])
-
-
-n_previous = 3
-for i in range(n_previous):
-    if i > 0:
-        name = 'PreviousPlay' + str(i + 1)
-    else:
-        name = 'PreviousPlay'
-        
-    prev_encoder = OrdinalEncoder()
-    pbp_df[name] = prev_encoder.fit_transform(pbp_df[[name]]).astype('float64')
 
 
 playtype_encoder = OrdinalEncoder()
 pbp_df['PlayType'] = playtype_encoder.fit_transform(pbp_df[['PlayType']]).astype('float64')
 
-#%% Add Drive Number feature
-
-pbp_df['DriveId'] = ~ (pbp_df['OffenseTeam'] == pbp_df['OffenseTeam'].shift(1))
-pbp_df['DriveId'] = pbp_df['DriveId'].cumsum()
-
-pbp_df['DriveId'] = pbp_df.groupby('GameId')['DriveId'].transform(lambda x: pd.factorize(x)[0])
-
-#%% Count length of drives
-
-sorted_drive_counts = pbp_df.groupby(['GameId', 'DriveId']).size().value_counts().sort_index()
-
-plt.bar(sorted_drive_counts.index, sorted_drive_counts)
-plt.xlabel('Length of Drive')
-plt.ylabel('Count')
-plt.show()
-
 #%% Reduce Drives to only include ones with more than three plays
 pbp_df_time = pbp_df.groupby(['GameId', 'DriveId']).filter(lambda x: len(x) > 3).copy()
 
-
-#%% For Drives with more plays only use last three
-pbp_df_time = pbp_df_time.groupby(['GameId', 'DriveId'], group_keys=False).apply(
-    lambda x: x.tail(4))
-
-#%% Check How many drives are left
-print('Drives Left:')
-print(pbp_df_time.groupby(['GameId', 'DriveId']).size().value_counts().sort_index())
-
 #%% Create LSTM Data Set
-variables = ['Down', 'ToGo', 'YardLine', 'GameTime', 'DriveId', 'NO HUDDLE', 
-             'NO HUDDLE SHOTGUN', 'SHOTGUN', 'UNDER CENTER', 'PreviousPlay']
+variables = ['Down', 'ToGo', 'YardLine', 'GameTime', 'PointDifference', 'DriveId', 'NO HUDDLE', 
+             'NO HUDDLE SHOTGUN', 'SHOTGUN', 'UNDER CENTER']
 
-for i in range(1, n_previous):
-    variables.append('PreviousPlay' + str(i + 1))
-    
 to_predict = 'PlayType'
 
 X_stack = []
 y_stack = []
 
-for name, group in pbp_df_time.groupby(['GameId', 'DriveId']):
-    X_stack.append(group[variables].head(3).to_numpy())
-    y_stack.append(group['PlayType'].tail(1).values[0])
 
-#%% Check Distribution of Run/Pass in Training Data
-print(F'{playtype_encoder.inverse_transform([[0]])[0][0]} : {y_stack.count(0)}')
-print(F'{playtype_encoder.inverse_transform([[1]])[0][0]} : {y_stack.count(1)}')
+for name, group in tqdm(pbp_df_time.groupby(['GameId', 'DriveId'])):
+    X = [group[variables].shift(-x).values[:3] for x in range(0, len(group))][:len(group) -3]
+    y = group['PlayType'].tolist()[3:] 
+    
+    X_stack += X
+    y_stack += y
+    
+    
+    # X_stack.append(group[variables].head(3).to_numpy())
+    # y_stack.append(group['PlayType'].tail(1).values[0])
 
 X_stack = np.array(X_stack)
 y_stack = np.array(y_stack)
+
+
+#%% Check Distribution of Run/Pass in Data
+unique, counts = np.unique(y_stack, return_counts=True)
+plt.bar(playtype_encoder.inverse_transform(unique.reshape(-1,1)).reshape(1,-1).tolist()[0], counts)
+plt.show()
+
 
 #%% Create Validation Set
 X_train, X_validation, y_train, y_validation = train_test_split(X_stack, y_stack, test_size = 0.1)
@@ -149,31 +163,14 @@ group_0_data = X_train[y_train == 0]
 group_1_data = X_train[y_train == 1]
 
 
-# Determine the smaller group size
-# min_group_size = min(len(group_0_data), len(group_1_data))
-max_group_size = max(len(group_0_data), len(group_1_data))
-
-#mean_group_size = int(sum([len(group_0_data), len(group_1_data)])/2)
-
 # Resample the larger group to match the smaller group size
-# resampled_group_0_data = resample(group_0_data, n_samples=min_group_size, replace=False, random_state=42)
-# resampled_group_1_data = resample(group_1_data, n_samples=min_group_size, replace=False, random_state=42)
+min_group_size = min(len(group_0_data), len(group_1_data))
 
-
-# Resample the groups to match the larger group size
-resampled_group_0_data = resample(group_0_data, n_samples=max_group_size, replace=True, random_state=42)
-resampled_group_1_data = resample(group_1_data, n_samples=max_group_size, replace=True, random_state=42)
-
-# Resample the groups to match the mean group size
-# resampled_group_0_data = resample(group_0_data, n_samples= mean_group_size, replace=True, random_state=42)
-# resampled_group_1_data = resample(group_1_data, n_samples= mean_group_size, replace=True, random_state=42)
+resampled_group_0_data = resample(group_0_data, n_samples=min_group_size, replace=False, random_state=42)
+resampled_group_1_data = resample(group_1_data, n_samples=min_group_size, replace=False, random_state=42)
 
 X_resampled = np.concatenate((resampled_group_0_data, resampled_group_1_data), axis=0)
-
-# y_resampled = np.concatenate((np.zeros(min_group_size), np.ones(group_size)), axis=0)
-y_resampled = np.concatenate((np.zeros(max_group_size), np.ones(max_group_size)), axis=0)
-# y_resampled = np.concatenate((np.zeros(mean_group_size), np.ones(group_size)), axis=0)
-
+y_resampled = np.concatenate((np.zeros(min_group_size), np.ones(min_group_size)), axis=0)
 
 
 #%% Train-Test-Split for LSTM Dataset
@@ -185,14 +182,14 @@ trainloader = DataLoader(dataset_train, shuffle=True, batch_size=256)
 
 
 #%% Initialize Model
-model = SimpleLSTM(len(variables), hidden_size = 124, num_layers = 3)
+model = SimpleLSTM(len(variables), hidden_size = 124, num_layers = 2)
 
-optimizer = torch.optim.Adam(model.parameters(), lr = 0.0007)
- 
+optimizer = torch.optim.Adam(model.parameters(), lr = 0.00007)
+
 criterion = nn.CrossEntropyLoss()
 
 #%% Training Loop for LSTM
-epochs = 250
+epochs = 150
 losses = []
 
 model.train()
@@ -204,16 +201,16 @@ for i in range(1, epochs + 1):
         X = batch[0]
         y = batch[1]
 
-        pred = model.forward(X)        
+        pred = model.forward(X)
         
         loss = criterion(pred,y.long())
-
+        
         optimizer.zero_grad()
         loss.backward()
         
         optimizer.step()
     
-    losses.append(loss)
+    losses.append(loss.detach().numpy())
 
     runtime = time.time() - start_time
     
@@ -229,90 +226,6 @@ for i in range(1, epochs + 1):
     
     print(F'{i}/{epochs} - Loss : {round(float(loss), 6)} - Runtime : {hours}h:{minutes}min:{seconds}s / {mean_hours}h:{mean_minutes}min:{mean_seconds}s')
 
-#%% Plot Losses
-losses = [loss.detach().numpy() for loss in losses]
-
-plt.plot(range(len(losses)), losses)
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.show()
-
-#%% Model Evaluation - Train Data
-with torch.no_grad():
-    y_pred = model.forward(torch.Tensor(X_train)).argmax(dim = 1).numpy()
-
-
-accuracy = accuracy_score(y_train,y_pred)
-precision = precision_score(y_train,y_pred)
-recall = recall_score(y_train,y_pred)
-f1 = f1_score(y_train,y_pred)
-
-print(F'''Accuracy: {100*accuracy.round(4)}%
-Precision: {100*precision.round(4)}%
-Recall: {100*recall.round(4)}%
-F1-Score: {f1.round(4)}''')
-
-cf_matrix = confusion_matrix(y_train ,y_pred, normalize = 'all')
-
-disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
-                              display_labels = playtype_encoder.categories_[0])
-
-disp.plot()
-plt.title('Confusion Matrix - Train Data')
-plt.show()
-
-
-#%% Model Evaluation - Test Data
-with torch.no_grad():
-    y_pred = model.forward(torch.Tensor(X_test)).argmax(dim = 1).numpy()
-
-accuracy = accuracy_score(y_test,y_pred)
-precision = precision_score(y_test,y_pred)
-recall = recall_score(y_test,y_pred)
-f1 = f1_score(y_test,y_pred)
-
-print(F'''Accuracy: {100*accuracy.round(4)}%
-Precision: {100*precision.round(4)}%
-Recall: {100*recall.round(4)}%
-F1-Score: {f1.round(4)}''')
-
-cf_matrix = confusion_matrix(y_test, y_pred, normalize = 'all')
-
-disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
-                              display_labels = playtype_encoder.categories_[0])
-
-disp.plot()
-plt.title('Confusion Matrix - Test Data')
-plt.show()
-
-#%% Model Evaluation - Validation Data
-with torch.no_grad():
-    y_pred = model.forward(torch.Tensor(X_validation)).argmax(dim = 1).numpy()
-    
-
-accuracy = accuracy_score(y_validation,y_pred)
-precision = precision_score(y_validation,y_pred)
-recall = recall_score(y_validation,y_pred)
-f1 = f1_score(y_validation,y_pred)
-
-print(F'''Accuracy: {100*accuracy.round(4)}%
-Precision: {100*precision.round(4)}%
-Recall: {100*recall.round(4)}%
-F1-Score: {f1.round(4)}''')
-
-cf_matrix = confusion_matrix(y_validation ,y_pred, normalize = 'all')
-
-disp = ConfusionMatrixDisplay(confusion_matrix = cf_matrix,
-                              display_labels = playtype_encoder.categories_[0])
-
-disp.plot()
-plt.title('Confusion Matrix - Validation Data')
-plt.show()
-
-#%% SHAP Values
-
-# TODO : Calculate SHAP values
-
 #%% Save Model
 PATH = './Models/'
 name = input('Model Name:')
@@ -321,7 +234,12 @@ name = input('Model Name:')
 exists = os.path.exists(PATH + name)
 
 if exists:
-    print('Name already in use.')
+    print('Name already in use. Do you want to overwrite?')
+    confirm = input('[y]/[n]').lower()
+    overwrite = (confirm == 'y')
+    if overwrite:
+        torch.save(model.state_dict(),  PATH + name)
+        print(F'Model {name} Saved')
 else:    
     torch.save(model.state_dict(),  PATH + name)
     print(F'Model {name} Saved')
@@ -329,13 +247,79 @@ else:
 # Hyperparameters should also be saved
 # TODO : Add logic for that
 
+#%% Plot Losses
+model.eval()
+
+plt.plot(range(len(losses)), losses)
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.show()
+
+moving_loss = []
+window_size = 20
+i = window_size
+while i < len(losses) - window_size:    
+    window = losses[i - window_size:i + window_size]
+    avg = sum(window)/len(window)
+    moving_loss.append(avg)
+    i += 1
+
+plt.plot(range(len(moving_loss)), moving_loss)
+plt.ylabel('Moving Loss')
+plt.show()
+
+
+#%% Model Evaluation - Train Data
+model_evaluation(model, playtype_encoder, X_train, y_train, 'Train Data')
+
+#%% Model Evaluation - Test Data
+model_evaluation(model, playtype_encoder, X_test, y_test, 'Test Data')
+
+#%% Model Evaluation - Validation Data
+model_evaluation(model, playtype_encoder, X_validation, y_validation, 'Validation Data')
+
+#%% Explainability - Surogate Model
+# TODO : Create Surogate Model
+
+#Unstack data
+shape = X_stack.shape
+X_unstacked = X_stack.reshape((shape[0], shape[1]*shape[2]))
+
+unstack_var_names = [var + '(t-3)' for var in variables]
+unstack_var_names += [var + '(t-2)' for var in variables]
+unstack_var_names += [var + '(t-1)' for var in variables]
+
+unstacked_df = pd.DataFrame(X_unstacked, columns=unstack_var_names)
+
+model.eval()
+with torch.no_grad():
+    y_pred = model.forward(torch.Tensor(X_stack)).argmax(dim = 1).numpy()
+
+#train classifier
+surogate = DecisionTreeClassifier()
+surogate.fit(unstacked_df, y_pred)
+
+#%%
+#extract variable importance
+importances = surogate.feature_importances_
+indices = np.argsort(importances)
+
+plt.title('Feature Importances')
+plt.barh([unstack_var_names[i] for i in indices], importances[indices])
+plt.xlabel('Relative Importance')
+plt.show()
+
+indices = indices[::-1]
+for feature, importance in zip([unstack_var_names[i] for i in indices], importances[indices]):
+    print(F'{feature}: {importance.round(4)}')
+
+
 #%% Load Model
 PATH = './Models/'
 name = input('Model Name:')
 
 model = SimpleLSTM(len(variables), hidden_size = 124, num_layers = 2)
 model.load_state_dict(torch.load(PATH + name))
-print('Model Loaded')
-
 model.eval()
+print('Model Loaded')
 
