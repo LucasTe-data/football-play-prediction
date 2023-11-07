@@ -15,11 +15,10 @@ This project aims to develop a deep learning model using Long Short-Term Memory 
 
 ## Dataset
 
-Describe the dataset used for training and testing the model. Provide instructions on how to obtain and format the data. If possible, provide a link to the dataset source.
+This data is collected by Daren Willman of NFLsavant.com. he provides data on every snap played in the NFL. For each year a CSV file is provided with each line representing a play. 
 
 Source: https://nflsavant.com/about.php
 Format: CSV
-Columns: List of columns with their meaning.
 
 ## Model Architecture
 
