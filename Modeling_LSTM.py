@@ -56,7 +56,7 @@ class SimpleLSTM(nn.Module):
         
         self.lin = nn.Linear(hidden_size, out_features)
         
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim = 1)
         
         
     
@@ -76,8 +76,15 @@ class SimpleLSTM(nn.Module):
 
 def model_evaluation(model, encoder, X, y, label = None):
     model.eval()
+    
+    if torch.cuda.is_available(): 
+        device = "cuda:0" 
+    else: 
+        device = "cpu" 
+    device = torch.device(device)
+    
     with torch.no_grad():
-        y_pred = model.forward(torch.Tensor(X)).argmax(dim = 1).numpy()
+        y_pred = model.forward(torch.Tensor(X).to(device)).argmax(dim = 1).cpu().numpy()
         
 
     accuracy = accuracy_score(y,y_pred)
@@ -172,24 +179,32 @@ resampled_group_1_data = resample(group_1_data, n_samples=min_group_size, replac
 X_resampled = np.concatenate((resampled_group_0_data, resampled_group_1_data), axis=0)
 y_resampled = np.concatenate((np.zeros(min_group_size), np.ones(min_group_size)), axis=0)
 
+#%% Set available device
+
+if torch.cuda.is_available(): 
+    device = "cuda:0" 
+else: 
+    device = "cpu" 
+device = torch.device(device) 
+
 
 #%% Train-Test-Split for LSTM Dataset
 X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled)
 
-dataset_train = TensorDataset(torch.Tensor(X_train), torch.Tensor(y_train))
+dataset_train = TensorDataset(torch.Tensor(X_train).to(device), torch.Tensor(y_train).to(device))
 
 trainloader = DataLoader(dataset_train, shuffle=True, batch_size=256)
 
 
 #%% Initialize Model
-model = SimpleLSTM(len(variables), hidden_size = 124, num_layers = 2)
+model = SimpleLSTM(len(variables), hidden_size = 256, num_layers = 2).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr = 0.00007)
 
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss().to(device)
 
 #%% Training Loop for LSTM
-epochs = 150
+epochs = 300
 losses = []
 
 model.train()
@@ -210,7 +225,7 @@ for i in range(1, epochs + 1):
         
         optimizer.step()
     
-    losses.append(loss.detach().numpy())
+    losses.append(loss.cpu().detach().numpy())
 
     runtime = time.time() - start_time
     
@@ -279,7 +294,6 @@ model_evaluation(model, playtype_encoder, X_test, y_test, 'Test Data')
 model_evaluation(model, playtype_encoder, X_validation, y_validation, 'Validation Data')
 
 #%% Explainability - Surogate Model
-# TODO : Create Surogate Model
 
 #Unstack data
 shape = X_stack.shape
@@ -293,7 +307,7 @@ unstacked_df = pd.DataFrame(X_unstacked, columns=unstack_var_names)
 
 model.eval()
 with torch.no_grad():
-    y_pred = model.forward(torch.Tensor(X_stack)).argmax(dim = 1).numpy()
+    y_pred = model.forward(torch.Tensor(X_stack).to(device)).argmax(dim = 1).cpu().numpy()
 
 #train classifier
 surogate = DecisionTreeClassifier()
@@ -306,6 +320,8 @@ indices = np.argsort(importances)
 
 plt.title('Feature Importances')
 plt.barh([unstack_var_names[i] for i in indices], importances[indices])
+plt.yticks(fontsize = 7)
+
 plt.xlabel('Relative Importance')
 plt.show()
 
