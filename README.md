@@ -61,9 +61,11 @@ The metrics used are:
 * F1-Score
 * Matthews Correlation Coefficient 
 
-Results
+## Results
 
-Future Improvements
+This project is currently still ongoing. Experiments are done, but this approach currently yields either massivly overfit models or strongly underfit models. Further improvements to the data and model architecture are needed.
+
+## Future Improvements
 
 To improve the performance of the model mutilple steps are planned.
 
