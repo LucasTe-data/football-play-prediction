@@ -22,8 +22,6 @@ Source: https://nflsavant.com/about.php
 Format: CSV
 Columns: List of columns with their meaning.
 
-
-<a name="architecture"/>
 ## Model Architecture
 
 The LSTM network in this project is designed to process input sequences consisting of 10 variables. It comprises two LSTM layers followed by a Softmax output layer.
@@ -68,20 +66,10 @@ Matthews Correlation Coefficient
 <a name="results"/>
 Results
 
-Present the results obtained after training and evaluating the model. Include any visualizations or graphs if applicable.
-
-For example:
-
-    Accuracy: 0.85
-    Precision: 0.87
-    Recall: 0.82
-    F1 Score: 0.84
-
 Future Improvements
 
 To improve the performance of the model mutilple steps are planned.
 
 For example:
-
-Enhancing existing data through feature engineering
-Making the model independent of drive length
+* Enhancing existing data through feature engineering
+* Making the model independent of drive length
