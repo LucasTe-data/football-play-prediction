@@ -6,11 +6,11 @@ This project aims to develop a deep learning model using Long Short-Term Memory 
 
 ##### Table of Contents
 
-[Dataset](#dataset)  
-[Model Architecture](#architecture)
-[Evaluation](#evaluation)
-[Results](#results)
-[Future Improvements](#imporvements)
+* [Dataset](#dataset)  
+* [Model Architecture](#architecture)
+* [Evaluation](#evaluation)
+* [Results](#results)
+* [Future Improvements](#imporvements)
 
 
 <a name="dataset"/>
