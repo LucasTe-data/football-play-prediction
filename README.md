@@ -15,7 +15,9 @@ This project aims to develop a deep learning model using Long Short-Term Memory 
 
 ## Dataset
 
-This data is collected by Daren Willman of NFLsavant.com. he provides data on every snap played in the NFL. For each year a CSV file is provided with each line representing a play. 
+This data is collected by Daren Willman of NFLsavant.com. For each season a CSV file is provided with each line representing a play.
+
+To use this data in a LSTM Network, plays are stacked in groups of three consecutive plays to predict the type of the following fourth play. This process is done in the script LSTM_modeling.py.
 
 Source: https://nflsavant.com/about.php
 Format: CSV
