@@ -6,24 +6,22 @@ This project aims to develop a deep learning model using Long Short-Term Memory 
 
 ##### Table of Contents
 
-[Dataset](#dataset)  
-[Model Architecture](#architecture)
-[Evaluation](#evaluation)
-[Results](#results)
-[Future Improvements](#imporvements)
+* [Dataset](#dataset)  
+* [Model Architecture](#architecture)
+* [Evaluation](#evaluation)
+* [Results](#results)
+* [Future Improvements](#improvements)
 
 
-<a name="dataset"/>
 ## Dataset
 
-Describe the dataset used for training and testing the model. Provide instructions on how to obtain and format the data. If possible, provide a link to the dataset source.
+This data is collected by Daren Willman of NFLsavant.com. For each season a CSV file is provided with each line representing a play.
+
+To use this data in a LSTM Network, plays are stacked in groups of three consecutive plays to predict the type of the following fourth play. This process is done in the script LSTM_modeling.py.
 
 Source: https://nflsavant.com/about.php
 Format: CSV
-Columns: List of columns with their meaning.
 
-
-<a name="architecture"/>
 ## Model Architecture
 
 The LSTM network in this project is designed to process input sequences consisting of 10 variables. It comprises two LSTM layers followed by a Softmax output layer.
@@ -53,35 +51,25 @@ Output Layer (Softmax):
     The Softmax layer transforms the output of the last LSTM layer into a probability distribution over the two categories RUN and PASS.
 
 
-<a name="evaluation"/>
 ## Evaluation
 
 After training the model on the available data multiple standard metrics are calculated. This process evaluates the performance by comparing predicted and true playtype. In order to avoid data leakage a holdout set of plays, not used in the inital training is used.
 
 The metrics used are:
-Accuracy
-Precision
-Recall
-F1-Score
-Matthews Correlation Coefficient 
+* Accuracy
+* Precision
+* Recall
+* F1-Score
+* Matthews Correlation Coefficient 
 
-<a name="results"/>
-Results
+## Results
 
-Present the results obtained after training and evaluating the model. Include any visualizations or graphs if applicable.
+This project is currently still ongoing. Experiments are done, but this approach currently yields either massivly overfit models or strongly underfit models. Further improvements to the data and model architecture are needed.
 
-For example:
-
-    Accuracy: 0.85
-    Precision: 0.87
-    Recall: 0.82
-    F1 Score: 0.84
-
-Future Improvements
+## Future Improvements
 
 To improve the performance of the model mutilple steps are planned.
 
 For example:
-
-Enhancing existing data through feature engineering
-Making the model independent of drive length
+* Enhancing existing data through feature engineering
+* Making the model independent of drive length
